@@ -1,0 +1,13 @@
+UseTab: Never
+IndentWidth: 4
+PointerAlignment: Left
+BinPackArguments: False
+InsertNewlineAtEOF: True
+AccessModifierOffset: -4
+PackConstructorInitializers: CurrentLine
+ConstructorInitializerIndentWidth: 2
+BreakConstructorInitializers: BeforeComma
+WrapNamespaceBodyWithEmptyLines: Always
+PenaltyBreakOpenParenthesis: 100000
+AllowShortBlocksOnASingleLine: Empty
+AllowShortFunctionsOnASingleLine: Empty
