@@ -4,15 +4,23 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 project(dump-analyzer LANGUAGES CXX)
 
-add_executable(dump-analyzer-cli src/main.cpp)
-target_compile_features(dump-analyzer-cli PUBLIC cxx_std_20)
+add_executable(
+    ${PROJECT_NAME}
+    src/main.cpp src/app/args.cpp src/app/app.cpp src/data/data.cpp
+    src/parse/parse.cpp src/utils/fs_utils.cpp)
+target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_20)
 set_target_properties(
-    dump-analyzer-cli
+    ${PROJECT_NAME}
     PROPERTIES CXX_EXTENSIONS OFF
                CXX_STANDARD_REQUIRED ON
                COMPILE_WARNING_AS_ERROR ON)
 if(MSVC)
-    target_compile_options(dump-analyzer-cli PRIVATE /W4)
+    target_compile_options(${PROJECT_NAME} PRIVATE /W4)
 else()
-    target_compile_options(dump-analyzer-cli PRIVATE -Wall -Wextra -pedantic)
+    target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra -pedantic)
 endif()
+
+target_include_directories(${PROJECT_NAME} PRIVATE src)
+
+add_subdirectory(third_party/argh)
+target_link_libraries(${PROJECT_NAME} PRIVATE argh)

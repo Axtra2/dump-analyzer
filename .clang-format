@@ -8,6 +8,13 @@ PackConstructorInitializers: CurrentLine
 ConstructorInitializerIndentWidth: 2
 BreakConstructorInitializers: BeforeComma
 WrapNamespaceBodyWithEmptyLines: Always
-PenaltyBreakOpenParenthesis: 100000
 AllowShortBlocksOnASingleLine: Empty
 AllowShortFunctionsOnASingleLine: Empty
+AlignConsecutiveAssignments:
+  Enabled: true
+AllowShortCaseLabelsOnASingleLine: True
+AlignConsecutiveShortCaseStatements:
+  Enabled: True
+AlignArrayOfStructures: Right
+AlignConsecutiveDeclarations: Consecutive
+ColumnLimit: 120
