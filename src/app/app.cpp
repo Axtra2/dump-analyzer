@@ -1,5 +1,6 @@
 #include <app/app.h>
 
+#include <utils/forest.h>
 #include <utils/fs_utils.h>
 
 #include <algorithm>
@@ -9,10 +10,12 @@
 #include <iostream>
 #include <stack>
 #include <stdexcept>
+#include <tuple>
 #include <unordered_set>
 
 namespace {
 
+[[maybe_unused]]
 void printDumpSummary(const DumpSummary& dumpSummary) {
     std::cout << std::format("Total number of records in dump: {}\n"
                              "Number of unique tags in dump:   {}\n\n",
@@ -76,7 +79,16 @@ void App::run(const Args& args) {
     }
     const R dumpBodyReader = r;
 
+#if 1
     dumpSummary = summarizeDump(dumpBodyReader, identifierSize);
+    std::cout << std::format("\n"
+                             "Heap Dump Summary:\n\n"
+                             "Size of identifiers: {}\n"
+                             "Milliseconds since 0:00 GMT, 1/1/70: {}\n\n",
+                             identifierSize,
+                             dumpHeader.millis);
+    printDumpSummary(dumpSummary);
+#endif
 
     // order of records is not guaranteed, so parse in separate passes
     strings             = parseStrings(dumpBodyReader, identifierSize);
@@ -89,15 +101,6 @@ void App::run(const Args& args) {
     stackFrames         = parseStackFrames(dumpBodyReader, identifierSize);
     stackTraces         = parseStackTraces(dumpBodyReader, identifierSize);
 
-    std::cout << std::format("\n"
-                             "Heap Dump Summary:\n\n"
-                             "Size of identifiers: {}\n"
-                             "Milliseconds since 0:00 GMT, 1/1/70: {}\n\n",
-                             identifierSize,
-                             dumpHeader.millis);
-
-    printDumpSummary(dumpSummary);
-
 #if 0
     for (const auto& [k, v] : stackTraces) {
         std::cout << std::format("\nstack trace {}:\n", static_cast<uint32_t>(v.stackTraceSerialNumber));
@@ -107,11 +110,37 @@ void App::run(const Args& args) {
     }
 #endif
 
+#if 0
+    const auto threads = parseRootThreads(dumpBodyReader, identifierSize);
+
+    std::cout << "\nThreads:\n\n";
+
+    for (const auto& [k, v] : threads) {
+        std::string_view name = "no name";
+        if (const auto nameV = getFieldValue(v.threadObjectID, "name"); isObjectID(nameV)) {
+            if (const auto nameArr = getFieldValue(static_cast<ObjectID>(nameV), "value");
+                isPrimitiveArrayID(nameArr)) {
+                const auto nameBytes = primitiveArrayDumps.at(static_cast<ArrayObjectID>(nameArr)).elementsView;
+                name = std::string_view(static_cast<const char*>((void*)nameBytes.data()), nameBytes.size());
+            }
+        }
+        std::cout << std::format("\"{}\" (obj={}, serial={}, st={})\n",
+                                 name,
+                                 formatID(v.threadObjectID),
+                                 static_cast<uint32_t>(v.threadSerialNumber),
+                                 static_cast<uint32_t>(v.stackTraceSerialNumber));
+    }
+#endif
+
     const auto coroutineInstances = getCoroutineInstances();
 
+#if 0
     std::cout << "\nCoroutines summary:\n\n";
-
     printCoroutinesList(coroutineInstances);
+#endif
+
+    std::cout << "\nHierarchy:\n\n";
+    printCoroutinesHierarchy(coroutineInstances);
 
 #if 0
     for (const auto id : getCoroutineClasses()) {
@@ -123,7 +152,7 @@ void App::run(const Args& args) {
     std::cout.flush();
 }
 
-void App::printInstance(ObjectID objectID, bool recurse, size_t indent) {
+void App::printInstance(ObjectID objectID, bool recurse, size_t indent, std::string_view name) {
     std::unordered_set<ObjectID> visited;
     const auto                   printInstanceImpl =
         [&visited, recurse, this](ObjectID objectID_, size_t indent_, std::string_view name_, const auto& f_) {
@@ -179,7 +208,7 @@ void App::printInstance(ObjectID objectID, bool recurse, size_t indent) {
                 std::cout << std::format("{} {} = {}\n", basicTypeName(f.type), fieldName, formatValue(v, f.type));
             });
         };
-    printInstanceImpl(objectID, indent, "", printInstanceImpl);
+    printInstanceImpl(objectID, indent, name, printInstanceImpl);
 }
 
 void App::printStackFrame(StackFrameID frameID, size_t indent) {
@@ -350,25 +379,20 @@ std::unordered_set<ClassObjectID> App::getCoroutineClasses(bool internal) {
     return coroutineClasses;
 }
 
-std::vector<ObjectID> App::getCoroutineInstances() {
-    const auto&           coroutineClasses = getCoroutineClasses();
-    std::vector<ObjectID> coroutineInstances;
+std::unordered_set<ObjectID> App::getCoroutineInstances() {
+    const auto&                  coroutineClasses = getCoroutineClasses();
+    std::unordered_set<ObjectID> coroutineInstances;
     for (const auto& [id, i] : instances) {
         if (coroutineClasses.contains(i.classObjectID)) {
-            coroutineInstances.push_back(id);
+            coroutineInstances.insert(id);
         }
     }
     return coroutineInstances;
 }
 
-void App::printCoroutinesList(const std::vector<ObjectID>& coroutinesList) {
+void App::printCoroutinesList(const std::unordered_set<ObjectID>& coroutinesList) {
     for (const auto& id : coroutinesList) {
-        const auto& instance         = instances.at(id);
-        const auto& loadClass        = loadClasses.at(instance.classObjectID);
-        const auto  className        = getView(loadClass.nameStringID).substr(19);
-        const auto  retainedHeapSize = calcRetainedHeapSize(id);
-        std::cout << std::format(
-            "{}@{}, state: {}, retained heap: {}\n", className, formatID(id), getCoroutineState(id), retainedHeapSize);
+        std::cout << formatCoroutine(id) << '\n';
     }
 }
 
@@ -393,7 +417,38 @@ std::string App::getCoroutineState(ObjectID id) {
     const auto& stateClass     = loadClasses.at(stateInstance.classObjectID);
     const auto  stateClassName = getView(stateClass.nameStringID);
 
-    // TODO: handle more states
+    // clang-format off
+    //    state class              public state
+    //    ------------             ------------
+    //    EmptyNew               : New         
+    //    EmptyActive            : Active      
+    //    JobNode                : Active      
+    //    JobNode                : Active      
+    //    InactiveNodeList       : New         
+    //    NodeList               : Active      
+    //    Finishing              : Completing  
+    //    Finishing              : Cancelling  
+    //    Cancelled              : Cancelled   
+    //    <any>                  : Completed
+    // clang-format on
+
+    if (stateClassName == "kotlinx/coroutines/InactiveNodeList") {
+        return "New";
+    }
+
+    if (stateClassName == "kotlinx/coroutines/NodeList") {
+        return "ACTIVE";
+    }
+
+    if (stateClassName == "kotlinx/coroutines/Empty") {
+        const bool isActive = static_cast<uint8_t>(getFieldValue(stateObjectID, "isActive"));
+        if (isActive) {
+            return "ACTIVE";
+        } else {
+            return "New";
+        }
+    }
+
     if (stateClassName == "kotlinx/coroutines/JobSupport$Finishing") {
         const bool isCompleting = static_cast<int32_t>(getFieldValue(stateObjectID, "_isCompleting$volatile"));
         if (isCompleting) {
@@ -401,11 +456,24 @@ std::string App::getCoroutineState(ObjectID id) {
         } else {
             return "CANCELLING";
         }
-    } else if (stateClassName == "kotlinx/coroutines/NodeList") {
-        return "ACTIVE";
-    } else {
-        return "UNKNOWN";
     }
+
+    { // JobNode
+        bool ok = false;
+        forEachSuperclass(stateClass.classObjectID, [&](ClassObjectID superclassID) {
+            if (ok) {
+                return;
+            }
+            const auto superclassName = getView(loadClasses.at(superclassID).nameStringID);
+            if (superclassName == "kotlinx/coroutines/JobNode") {
+                ok = true;
+            }
+        });
+        if (ok) {
+            return "ACTIVE";
+        }
+    }
+    return "COMPLETED";
 }
 
 std::string_view App::getView(StringID stringID) {
@@ -425,12 +493,12 @@ void App::printClass(ClassObjectID classObjectID) {
         return;
     }
 
-    const auto instances = getClassInstances(classObjectID);
+    const auto classInstances = getClassInstances(classObjectID);
     std::cout << std::format("{} (id={}, serial={}, {} instance(s)):\n",
                              name,
                              formatID(classObjectID),
                              c.classSerialNumber,
-                             instances.size());
+                             classInstances.size());
 
     const auto& dump = classDumps.at(c.classObjectID);
 
@@ -469,12 +537,108 @@ void App::printClass(ClassObjectID classObjectID) {
         }
     });
 
-    if (instances.empty()) {
+    if (classInstances.empty()) {
         return;
     }
 
     std::cout << "  instance(s):\n";
-    for (const auto& objectID : instances) {
-        printInstance(objectID, false, 4);
+    for (const auto& objectID : classInstances) {
+        printInstance(objectID, true, 4);
     }
+}
+
+std::string App::formatInstance(ObjectID id, std::string_view name) {
+    const auto& instance  = instances.at(id);
+    const auto& loadClass = loadClasses.at(instance.classObjectID);
+    const auto  className = getView(loadClass.nameStringID);
+    return std::format("{} {} = {}", className, name, formatID(id));
+}
+
+std::string App::formatCoroutine(ObjectID id) {
+    const auto& instance  = instances.at(id);
+    const auto& loadClass = loadClasses.at(instance.classObjectID);
+    const auto  className = getView(loadClass.nameStringID).substr(19);
+    return std::format("{}@{}, state: {}", className, formatID(id), getCoroutineState(id));
+}
+
+std::optional<ObjectID> App::getCoroutineParent(ObjectID coroutine) {
+    const ID maybeParentHandleID = getFieldValue(coroutine, "_parentHandle$volatile");
+    if (!isObjectID(maybeParentHandleID)) {
+        return std::nullopt;
+    }
+    const auto parentHandleID = static_cast<ObjectID>(maybeParentHandleID);
+
+    const auto& parentHandle          = instances.at(parentHandleID);
+    const auto& parentHandleClass     = loadClasses.at(parentHandle.classObjectID);
+    const auto  parentHandleClassName = getView(parentHandleClass.nameStringID);
+
+    if (parentHandleClassName != "kotlinx/coroutines/ChildHandleNode") {
+        return std::nullopt;
+    }
+
+    const auto maybeParentJobID = getFieldValue(parentHandleID, "job");
+    if (!isObjectID(maybeParentJobID)) {
+        return std::nullopt;
+    }
+    const auto parentJobID = static_cast<ObjectID>(maybeParentJobID);
+
+    return parentJobID;
+}
+
+void App::printCoroutinesHierarchy(const std::unordered_set<ObjectID>& coroutines) {
+
+    Forest<ObjectID> forest;
+
+    std::unordered_map<ObjectID, Forest<ObjectID>::NodeHandle> IDToNode;
+
+    for (const auto id : coroutines) {
+        if (IDToNode.contains(id)) {
+            continue;
+        }
+
+        std::stack<ObjectID>    path;
+        std::optional<ObjectID> maybeParentID = getCoroutineParent(id);
+
+        auto currID = id;
+
+        while (true) {
+            if (!maybeParentID.has_value()) {
+                const auto node = forest.newRoot(currID);
+                IDToNode.insert({currID, node});
+                break;
+            }
+            path.push(currID);
+            currID = maybeParentID.value();
+            if (IDToNode.contains(currID)) {
+                break;
+            }
+            maybeParentID = getCoroutineParent(currID);
+        }
+
+        auto prevNode = IDToNode.at(currID);
+
+        while (!path.empty()) {
+            currID = path.top();
+            path.pop();
+            const auto node = forest.newNode(currID, prevNode);
+            IDToNode.insert({currID, node});
+            prevNode = node;
+        }
+    }
+
+    forest.forEachRoot([&](const auto root) {
+        static constexpr size_t INDENT_STEP = 2;
+
+        std::stack<std::pair<size_t, Forest<ObjectID>::NodeHandle>> toVisit;
+        toVisit.push({0, root});
+        while (!toVisit.empty()) {
+            const auto [depth, node] = toVisit.top();
+            toVisit.pop();
+            const auto indent = depth * INDENT_STEP;
+            std::cout << std::string(indent, ' ') << formatCoroutine(forest.getValue(node)) << '\n';
+            for (const auto child : forest.getChildren(node)) {
+                toVisit.push({depth + 1, child});
+            }
+        }
+    });
 }

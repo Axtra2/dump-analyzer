@@ -87,7 +87,7 @@ void parseDumpBody(R r, const std::unordered_map<Tag, TagHandler>& tagHandlers) 
     }
 }
 
-std::unordered_map<StringID, StringInUTF8> parseStrings(R r, size_t identifierSize) {
+std::unordered_map<StringID, StringInUTF8> parseStrings(R reader, size_t identifierSize) {
     std::unordered_map<StringID, StringInUTF8> strings;
     const std::unordered_map<Tag, TagHandler>  handlers = {
         {Tag::STRING_IN_UTF8,
@@ -99,11 +99,11 @@ std::unordered_map<StringID, StringInUTF8> parseStrings(R r, size_t identifierSi
              strings.insert({s.id, s});
          }},
     };
-    parseDumpBody(r, handlers);
+    parseDumpBody(reader, handlers);
     return strings;
 }
 
-std::unordered_map<ClassObjectID, LoadClass> parseLoadClasses(R r, const DumpHeader& dumpHeader) {
+std::unordered_map<ClassObjectID, LoadClass> parseLoadClasses(R reader, const DumpHeader& dumpHeader) {
     std::unordered_map<ClassObjectID, LoadClass> loadClasses;
     const std::unordered_map<Tag, TagHandler>    handlers = {
         {Tag::LOAD_CLASS,
@@ -116,7 +116,7 @@ std::unordered_map<ClassObjectID, LoadClass> parseLoadClasses(R r, const DumpHea
              loadClasses.insert({c.classObjectID, c});
          }},
     };
-    parseDumpBody(r, handlers);
+    parseDumpBody(reader, handlers);
     return loadClasses;
 }
 
@@ -160,7 +160,7 @@ void skipPrimitiveArrayDump(R& r, size_t identifierSize) {
     r.skip(basicTypeSize(type) * nElements);
 }
 
-void parseHeapDumpSegment(R& r, size_t identifierSize,
+void parseHeapDumpSegment(R& reader, size_t identifierSize,
                           const std::unordered_map<SubTag, SubTagHandler>& subTagHandlers) {
     static const std::unordered_map<SubTag, SubTagHandler> defaultDynamicSubTagHandlers = {
         {          SubTag::CLASS_DUMP,          [=](R& r) { skipClassDump(r, identifierSize); }},
@@ -168,24 +168,24 @@ void parseHeapDumpSegment(R& r, size_t identifierSize,
         {   SubTag::OBJECT_ARRAY_DUMP,    [=](R& r) { skipObjectArrayDump(r, identifierSize); }},
         {SubTag::PRIMITIVE_ARRAY_DUMP, [=](R& r) { skipPrimitiveArrayDump(r, identifierSize); }},
     };
-    while (!r.eof()) {
-        SubTag subTag = validateSubTag(r.read<uint8_t>());
+    while (!reader.eof()) {
+        SubTag subTag = validateSubTag(reader.read<uint8_t>());
         if (const auto it = subTagHandlers.find(subTag); it != subTagHandlers.end()) {
             auto& handler = it->second;
-            handler(r);
+            handler(reader);
         } else {
             size_t subRecordBodySize = subTagSize(subTag, identifierSize);
             if (subRecordBodySize == DYNAMIC) {
-                if (const auto it = defaultDynamicSubTagHandlers.find(subTag);
-                    it != defaultDynamicSubTagHandlers.end()) {
-                    auto& defaultHandler = it->second;
-                    defaultHandler(r);
+                if (const auto it_ = defaultDynamicSubTagHandlers.find(subTag);
+                    it_ != defaultDynamicSubTagHandlers.end()) {
+                    auto& defaultHandler = it_->second;
+                    defaultHandler(reader);
                 } else {
                     throw std::runtime_error(std::format(
                         "unexpected dynamic sub-tag {} (0x{:02X})", subTagName(subTag), static_cast<uint8_t>(subTag)));
                 }
             } else {
-                r.skip(subRecordBodySize);
+                reader.skip(subRecordBodySize);
             }
         }
     }
@@ -203,7 +203,7 @@ createHeapDumpSegmentHandler(size_t identifierSize, const std::unordered_map<Sub
     };
 }
 
-std::unordered_map<ClassObjectID, ClassDump> parseClassDumps(R r, size_t identifierSize) {
+std::unordered_map<ClassObjectID, ClassDump> parseClassDumps(R reader, size_t identifierSize) {
     std::unordered_map<ClassObjectID, ClassDump>    classDumps;
     const std::unordered_map<SubTag, SubTagHandler> subTagHandlers = {
         {SubTag::CLASS_DUMP, [&](R& r) {
@@ -251,11 +251,11 @@ std::unordered_map<ClassObjectID, ClassDump> parseClassDumps(R r, size_t identif
         {        Tag::HEAP_DUMP, heapDumpSegmentTagHandler},
         {Tag::HEAP_DUMP_SEGMENT, heapDumpSegmentTagHandler},
     };
-    parseDumpBody(r, handlers);
+    parseDumpBody(reader, handlers);
     return classDumps;
 }
 
-std::unordered_map<ClassObjectID, size_t> countInstances(R r, size_t identifierSize) {
+std::unordered_map<ClassObjectID, size_t> countInstances(R reader, size_t identifierSize) {
     std::unordered_map<ClassObjectID, size_t>       counts;
     const std::unordered_map<SubTag, SubTagHandler> subTagHandlers = {
         {SubTag::INSTANCE_DUMP,
@@ -272,7 +272,7 @@ std::unordered_map<ClassObjectID, size_t> countInstances(R r, size_t identifierS
         {        Tag::HEAP_DUMP, heapDumpSegmentTagHandler},
         {Tag::HEAP_DUMP_SEGMENT, heapDumpSegmentTagHandler},
     };
-    parseDumpBody(r, handlers);
+    parseDumpBody(reader, handlers);
     return counts;
 }
 
@@ -286,7 +286,7 @@ InstanceDump parseInstanceDump(R& r, size_t identifierSize) {
     return i;
 }
 
-std::unordered_map<ObjectID, const std::byte*> parseAllInstanceLocations(R r, size_t identifierSize) {
+std::unordered_map<ObjectID, const std::byte*> parseAllInstanceLocations(R reader, size_t identifierSize) {
     std::unordered_map<ObjectID, const std::byte*>  locations;
     const std::unordered_map<SubTag, SubTagHandler> subTagHandlers = {
         {SubTag::INSTANCE_DUMP,
@@ -304,11 +304,11 @@ std::unordered_map<ObjectID, const std::byte*> parseAllInstanceLocations(R r, si
         {        Tag::HEAP_DUMP, heapDumpSegmentTagHandler},
         {Tag::HEAP_DUMP_SEGMENT, heapDumpSegmentTagHandler},
     };
-    parseDumpBody(r, handlers);
+    parseDumpBody(reader, handlers);
     return locations;
 }
 
-std::unordered_map<ObjectID, InstanceDump> parseClassInstances(R r, size_t identifierSize, ClassObjectID target) {
+std::unordered_map<ObjectID, InstanceDump> parseClassInstances(R reader, size_t identifierSize, ClassObjectID target) {
     std::unordered_map<ObjectID, InstanceDump>      instances;
     const std::unordered_map<SubTag, SubTagHandler> subTagHandlers = {
         {SubTag::INSTANCE_DUMP,
@@ -325,11 +325,11 @@ std::unordered_map<ObjectID, InstanceDump> parseClassInstances(R r, size_t ident
         {        Tag::HEAP_DUMP, heapDumpSegmentTagHandler},
         {Tag::HEAP_DUMP_SEGMENT, heapDumpSegmentTagHandler},
     };
-    parseDumpBody(r, handlers);
+    parseDumpBody(reader, handlers);
     return instances;
 }
 
-std::unordered_map<StackFrameID, StackFrame> parseStackFrames(R r, size_t identifierSize) {
+std::unordered_map<StackFrameID, StackFrame> parseStackFrames(R reader, size_t identifierSize) {
     std::unordered_map<StackFrameID, StackFrame> frames;
     std::unordered_map<Tag, TagHandler>          tagHandlers = {
         {Tag::STACK_FRAME,
@@ -344,11 +344,11 @@ std::unordered_map<StackFrameID, StackFrame> parseStackFrames(R r, size_t identi
              frames.insert({frame.stackFrameID, frame});
          }},
     };
-    parseDumpBody(r, tagHandlers);
+    parseDumpBody(reader, tagHandlers);
     return frames;
 }
 
-std::unordered_map<StackTraceSerialNumber, StackTrace> parseStackTraces(R r, size_t identifierSize) {
+std::unordered_map<StackTraceSerialNumber, StackTrace> parseStackTraces(R reader, size_t identifierSize) {
     std::unordered_map<StackTraceSerialNumber, StackTrace> traces;
     std::unordered_map<Tag, TagHandler>                    tagHandlers = {
         {Tag::STACK_TRACE,
@@ -364,11 +364,11 @@ std::unordered_map<StackTraceSerialNumber, StackTrace> parseStackTraces(R r, siz
              traces.insert({serialNumber, std::move(trace)});
          }},
     };
-    parseDumpBody(r, tagHandlers);
+    parseDumpBody(reader, tagHandlers);
     return traces;
 }
 
-std::unordered_map<ArrayObjectID, ObjectArrayDump> parseObjectArrayDumps(R r, size_t identifierSize) {
+std::unordered_map<ArrayObjectID, ObjectArrayDump> parseObjectArrayDumps(R reader, size_t identifierSize) {
     std::unordered_map<ArrayObjectID, ObjectArrayDump> objectArrays;
     const std::unordered_map<SubTag, SubTagHandler>    subTagHandlers = {
         {SubTag::OBJECT_ARRAY_DUMP,
@@ -388,11 +388,11 @@ std::unordered_map<ArrayObjectID, ObjectArrayDump> parseObjectArrayDumps(R r, si
         {        Tag::HEAP_DUMP, heapDumpSegmentTagHandler},
         {Tag::HEAP_DUMP_SEGMENT, heapDumpSegmentTagHandler},
     };
-    parseDumpBody(r, handlers);
+    parseDumpBody(reader, handlers);
     return objectArrays;
 }
 
-std::unordered_map<ArrayObjectID, PrimitiveArrayDump> parsePrimitiveArrayDumps(R r, size_t identifierSize) {
+std::unordered_map<ArrayObjectID, PrimitiveArrayDump> parsePrimitiveArrayDumps(R reader, size_t identifierSize) {
     std::unordered_map<ArrayObjectID, PrimitiveArrayDump> primitiveArrays;
     const std::unordered_map<SubTag, SubTagHandler>       subTagHandlers = {
         {SubTag::PRIMITIVE_ARRAY_DUMP,
@@ -412,11 +412,11 @@ std::unordered_map<ArrayObjectID, PrimitiveArrayDump> parsePrimitiveArrayDumps(R
         {        Tag::HEAP_DUMP, heapDumpSegmentTagHandler},
         {Tag::HEAP_DUMP_SEGMENT, heapDumpSegmentTagHandler},
     };
-    parseDumpBody(r, handlers);
+    parseDumpBody(reader, handlers);
     return primitiveArrays;
 }
 
-std::unordered_map<ObjectID, InstanceDump> parseInstanceDumps(R r, size_t identifierSize) {
+std::unordered_map<ObjectID, InstanceDump> parseInstanceDumps(R reader, size_t identifierSize) {
     std::unordered_map<ObjectID, InstanceDump>      instances;
     const std::unordered_map<SubTag, SubTagHandler> subTagHandlers = {
         {SubTag::INSTANCE_DUMP,
@@ -431,6 +431,28 @@ std::unordered_map<ObjectID, InstanceDump> parseInstanceDumps(R r, size_t identi
         {        Tag::HEAP_DUMP, heapDumpSegmentTagHandler},
         {Tag::HEAP_DUMP_SEGMENT, heapDumpSegmentTagHandler},
     };
-    parseDumpBody(r, handlers);
+    parseDumpBody(reader, handlers);
     return instances;
+}
+
+std::unordered_map<ObjectID, RootThread> parseRootThreads(R reader, size_t identifierSize) {
+    std::unordered_map<ObjectID, RootThread>        rootThreads;
+    const std::unordered_map<SubTag, SubTagHandler> subTagHandlers = {
+        {SubTag::ROOT_THREAD_OBJECT,
+         [&, identifierSize](R& r) {
+             RootThread rootThread;
+             r.read(rootThread.threadObjectID, identifierSize);
+             r.read(rootThread.threadSerialNumber);
+             r.read(rootThread.stackTraceSerialNumber);
+             const auto objectID = rootThread.threadObjectID;
+             rootThreads.insert({objectID, std::move(rootThread)});
+         }},
+    };
+    const auto heapDumpSegmentTagHandler               = createHeapDumpSegmentHandler(identifierSize, subTagHandlers);
+    const std::unordered_map<Tag, TagHandler> handlers = {
+        {        Tag::HEAP_DUMP, heapDumpSegmentTagHandler},
+        {Tag::HEAP_DUMP_SEGMENT, heapDumpSegmentTagHandler},
+    };
+    parseDumpBody(reader, handlers);
+    return rootThreads;
 }

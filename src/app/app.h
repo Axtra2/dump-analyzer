@@ -6,6 +6,7 @@
 
 #include <cstddef>
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -17,7 +18,7 @@ public:
     void run(const Args& args);
 
 private:
-    void printInstance(ObjectID objectID, bool recurse = false, size_t indent = 0);
+    void printInstance(ObjectID objectID, bool recurse = false, size_t indent = 0, std::string_view name = "");
 
     void printStackFrame(StackFrameID frameID, size_t indent = 0);
 
@@ -41,9 +42,9 @@ private:
 
     std::unordered_set<ClassObjectID> getCoroutineClasses(bool internal = true);
 
-    std::vector<ObjectID> getCoroutineInstances();
+    std::unordered_set<ObjectID> getCoroutineInstances();
 
-    void printCoroutinesList(const std::vector<ObjectID>& coroutineInstances);
+    void printCoroutinesList(const std::unordered_set<ObjectID>& coroutineInstances);
 
     Value getFieldValue(ObjectID id, std::string_view fieldName);
 
@@ -52,6 +53,14 @@ private:
     std::string_view getView(StringID stringID);
 
     void printClass(ClassObjectID classObjectID);
+
+    std::optional<ObjectID> getCoroutineParent(ObjectID coroutine);
+
+    std::string formatInstance(ObjectID id, std::string_view name = "");
+
+    std::string formatCoroutine(ObjectID id);
+
+    void printCoroutinesHierarchy(const std::unordered_set<ObjectID>& coroutines);
 
 private:
     size_t                                                 identifierSize;

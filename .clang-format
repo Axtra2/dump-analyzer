@@ -18,3 +18,4 @@ AlignConsecutiveShortCaseStatements:
 AlignArrayOfStructures: Right
 AlignConsecutiveDeclarations: Consecutive
 ColumnLimit: 120
+BreakTemplateDeclarations: Yes

@@ -21,7 +21,8 @@ public:
     R& operator=(R&&)      = default;
 
 public:
-    template <typename T, std::endian E = std::endian::big> void read(T& v, size_t n) {
+    template <typename T, std::endian E = std::endian::big>
+    void read(T& v, size_t n) {
         if (n > sizeof(T)) {
             throw std::runtime_error("n must be <= sizeof(v)");
         }
@@ -41,7 +42,8 @@ public:
         read_ += n;
     }
 
-    template <std::endian E = std::endian::big> void read(auto& v) {
+    template <std::endian E = std::endian::big>
+    void read(auto& v) {
         const size_t n = sizeof(v);
         ensure(n);
         std::byte* dst = reinterpret_cast<std::byte*>(&v);
@@ -53,13 +55,15 @@ public:
         read_ += n;
     }
 
-    template <typename T, std::endian E = std::endian::big> T read() {
+    template <typename T, std::endian E = std::endian::big>
+    T read() {
         T v{0};
         read<E>(v);
         return v;
     }
 
-    template <typename T, std::endian E = std::endian::big> T read(size_t n) {
+    template <typename T, std::endian E = std::endian::big>
+    T read(size_t n) {
         T v{0};
         read<T, E>(v, n);
         return v;
@@ -93,6 +97,6 @@ private:
 
 private:
     const std::byte* begin_;
-    size_t           size_;
+    const size_t     size_;
     size_t           read_;
 };

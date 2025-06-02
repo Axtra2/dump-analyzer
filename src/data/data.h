@@ -177,6 +177,14 @@ struct PrimitiveArrayDump {
     std::span<const std::byte> elementsView;
 };
 
+enum class ThreadSerialNumber : uint32_t {};
+
+struct RootThread {
+    ObjectID               threadObjectID;
+    ThreadSerialNumber     threadSerialNumber;
+    StackTraceSerialNumber stackTraceSerialNumber;
+};
+
 inline bool isNull(isID auto id) {
     return static_cast<ID>(id) == 0;
 }

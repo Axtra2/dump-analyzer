@@ -58,3 +58,5 @@ std::unordered_map<ArrayObjectID, ObjectArrayDump> parseObjectArrayDumps(R r, si
 std::unordered_map<ArrayObjectID, PrimitiveArrayDump> parsePrimitiveArrayDumps(R r, size_t identifierSize);
 
 std::unordered_map<ObjectID, InstanceDump> parseInstanceDumps(R r, size_t identifierSize);
+
+std::unordered_map<ObjectID, RootThread> parseRootThreads(R r, size_t identifierSize);
